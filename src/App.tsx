@@ -1,7 +1,7 @@
 /* eslint-disable jsx-a11y/control-has-associated-label */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import cn from 'classnames';
-import { TEMP_TODO_ID } from './constants';
+import { MAIN_PHRASES, ERROR_MESSAGE, TEMP_TODO_ID } from './constants';
 import {
   USER_ID,
   addTodo,
@@ -15,14 +15,14 @@ import { Filter, FilterType } from './types/FilterType';
 import { TodoList } from './components/TodoList';
 import { TodoFooter } from './components/TodoFooter';
 import { ErrorNotification } from './components/ErrorNotification';
-import { ErrorMessage, MainPhrases } from './constants';
+import { ErrorMessage } from './types/Phrases';
 
 export const App: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [tempTodo, setTempTodo] = useState<Partial<Todo> | null>(null);
   const [filter, setFilter] = useState<FilterType>(Filter.All);
   const [errorMessage, setErrorMessage] = useState<ErrorMessage>(
-    ErrorMessage.default,
+    ERROR_MESSAGE.default,
   );
   const [processingIds, setProcessingIds] = useState<number[]>([]);
 
@@ -31,7 +31,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     getTodos()
       .then(setTodos)
-      .catch(() => setErrorMessage(ErrorMessage.errorLoadFailed));
+      .catch(() => setErrorMessage(ERROR_MESSAGE.errorLoadFailed));
   }, []);
 
   const filteredTodos = useMemo(() => {
@@ -60,7 +60,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  const onAdd = (title: string) => {
+  const handleAddTodo = async (title: string) => {
     if (!input.current || tempTodo) {
       return;
     }
@@ -76,25 +76,26 @@ export const App: React.FC = () => {
         completed: false,
       });
 
-      addTodo(trimmedTitle)
-        .then(newTodo => {
-          setTodos(prevTodos => [...prevTodos, newTodo]);
+      try {
+        const newTodo = await addTodo(trimmedTitle);
 
-          if (input.current) {
-            input.current.value = '';
-          }
-        })
-        .catch(() => setErrorMessage(ErrorMessage.errorAddFailed))
-        .finally(() => {
-          if (input.current) {
-            input.current.disabled = false;
-            input.current.focus();
-          }
+        setTodos(prevTodos => [...prevTodos, newTodo]);
 
-          setTempTodo(null);
-        });
+        if (input.current) {
+          input.current.value = '';
+        }
+      } catch {
+        setErrorMessage(ERROR_MESSAGE.errorAddFailed);
+      } finally {
+        if (input.current) {
+          input.current.disabled = false;
+          input.current.focus();
+        }
+
+        setTempTodo(null);
+      }
     } else {
-      setErrorMessage(ErrorMessage.errorEmptyTitle);
+      setErrorMessage(ERROR_MESSAGE.errorEmptyTitle);
     }
   };
 
@@ -102,111 +103,123 @@ export const App: React.FC = () => {
     e.preventDefault();
 
     if (input.current) {
-      onAdd(input.current.value);
+      handleAddTodo(input.current.value);
     }
   };
 
-  const onUpdate = (id: number, changes: TodoChangeOptions): Promise<void> => {
+  const handleUpdateTodo = async (
+    id: number,
+    changes: TodoChangeOptions,
+  ): Promise<void> => {
     const todo = todos.find(td => td.id === id);
 
     if (!todo) {
-      return Promise.resolve();
+      return;
     }
 
     setProcessingIds(prev => [...prev, id]);
 
-    return updateTodo(id, {
-      completed: changes.completed ?? todo.completed,
-      title: changes.title ?? todo.title,
-    })
-      .then(updatedTodo => {
-        setTodos(prevTodos =>
-          prevTodos.map(td => (td.id === id ? updatedTodo : td)),
-        );
-      })
-      .catch(() => {
-        setErrorMessage(ErrorMessage.errorUpdateFailed);
-
-        return Promise.reject();
-      })
-      .finally(() => {
-        setProcessingIds(prev => prev.filter(todoId => todoId !== id));
+    try {
+      const updatedTodo = await updateTodo(id, {
+        completed: changes.completed ?? todo.completed,
+        title: changes.title ?? todo.title,
       });
+
+      setTodos(prevTodos =>
+        prevTodos.map(td => (td.id === id ? updatedTodo : td)),
+      );
+    } catch (error) {
+      setErrorMessage(ERROR_MESSAGE.errorUpdateFailed);
+      throw error;
+    } finally {
+      setProcessingIds(prev => prev.filter(todoId => todoId !== id));
+    }
   };
 
-  const onToggleAll = () => {
+  const handleToggleAll = async () => {
     const shouldCompleteAll = !allCompleted;
 
-    const idsToUpdate = todos
-      .filter(todo => todo.completed !== shouldCompleteAll)
-      .map(todo => todo.id);
+    const todosToUpdate = todos.filter(
+      todo => todo.completed !== shouldCompleteAll,
+    );
 
-    setProcessingIds(prev => [...prev, ...idsToUpdate]);
+    setProcessingIds(prev => [...prev, ...todosToUpdate.map(t => t.id)]);
 
-    Promise.allSettled(
-      idsToUpdate.map(id =>
-        updateTodo(id, { completed: shouldCompleteAll })
-          .then(updatedTodo => {
-            setTodos(prevTodos =>
-              prevTodos.map(td => (td.id === id ? updatedTodo : td)),
-            );
-          })
-          .finally(() => {
-            setProcessingIds(prev => prev.filter(todoId => todoId !== id));
-          }),
+    const results = await Promise.allSettled(
+      todosToUpdate.map(todo =>
+        updateTodo(todo.id, { completed: shouldCompleteAll }),
       ),
-    ).then(results => {
-      const hasErrors = results.some(result => result.status === 'rejected');
+    );
 
-      if (hasErrors) {
-        setErrorMessage(ErrorMessage.errorUpdateFailed);
-      }
-    });
+    const successfulTodoUpdates = results
+      .map((result, index) =>
+        result.status === 'fulfilled'
+          ? { ...todosToUpdate[index], completed: shouldCompleteAll }
+          : null,
+      )
+      .filter((todo): todo is Todo => todo !== null);
+
+    setTodos(prevTodos =>
+      prevTodos.map(
+        todo =>
+          successfulTodoUpdates.find(updated => updated.id === todo.id) || todo,
+      ),
+    );
+
+    setProcessingIds(prev =>
+      prev.filter(id => !todosToUpdate.some(t => t.id === id)),
+    );
+
+    const hasErrors = results.some(result => result.status === 'rejected');
+
+    if (hasErrors) {
+      setErrorMessage(ERROR_MESSAGE.errorUpdateFailed);
+    }
   };
 
-  const onDelete = (id: number): Promise<void> => {
+  const handleDeleteTodo = async (id: number): Promise<void> => {
     setProcessingIds(prev => [...prev, id]);
 
-    return deleteTodo(id)
-      .then(() => {
-        setTodos(prevTodos => prevTodos.filter(todo => todo.id !== id));
-      })
-      .catch(() => {
-        setErrorMessage(ErrorMessage.errorDeleteFailed);
-
-        return Promise.reject();
-      })
-      .finally(() => {
-        setProcessingIds(prev => prev.filter(todoId => todoId !== id));
-        input.current?.focus();
-      });
+    try {
+      await deleteTodo(id);
+      setTodos(prevTodos => prevTodos.filter(todo => todo.id !== id));
+    } catch (error) {
+      setErrorMessage(ERROR_MESSAGE.errorDeleteFailed);
+      throw error;
+    } finally {
+      setProcessingIds(prev => prev.filter(todoId => todoId !== id));
+      input.current?.focus();
+    }
   };
 
-  const onDeleteCompleted = () => {
+  const handleDeleteCompleted = async () => {
     const completedTodos = todos.filter(todo => todo.completed);
-    const completedIds = completedTodos.map(todo => todo.id);
 
-    setProcessingIds(prev => [...prev, ...completedIds]);
+    setProcessingIds(prev => [...prev, ...completedTodos.map(t => t.id)]);
 
-    Promise.allSettled(
-      completedTodos.map(todo =>
-        deleteTodo(todo.id)
-          .then(() => {
-            setTodos(prevTodos => prevTodos.filter(td => td.id !== todo.id));
-          })
-          .finally(() => {
-            setProcessingIds(prev => prev.filter(id => id !== todo.id));
-          }),
-      ),
-    ).then(results => {
-      const hasErrors = results.some(result => result.status === 'rejected');
+    const results = await Promise.allSettled(
+      completedTodos.map(todo => deleteTodo(todo.id)),
+    );
 
-      if (hasErrors) {
-        setErrorMessage(ErrorMessage.errorDeleteFailed);
-      }
+    const successfullyDeletedIds = completedTodos
+      .filter((_, index) => results[index].status === 'fulfilled')
+      .map(todo => todo.id);
 
-      input.current?.focus();
-    });
+    setTodos(prevTodos =>
+      prevTodos.filter(todo => !successfullyDeletedIds.includes(todo.id)),
+    );
+
+    setProcessingIds(prev =>
+      prev.filter(id => !completedTodos.some(t => t.id === id)),
+    );
+
+    const hasErrors = results.some(result => result.status === 'rejected');
+
+    if (hasErrors) {
+      setErrorMessage(ERROR_MESSAGE.errorDeleteFailed);
+    }
+
+    input.current?.focus();
   };
 
   if (!USER_ID) {
@@ -215,7 +228,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="todoapp">
-      <h1 className="todoapp__title">{MainPhrases.headerTitle}</h1>
+      <h1 className="todoapp__title">{MAIN_PHRASES.headerTitle}</h1>
 
       <div className="todoapp__content">
         <header className="todoapp__header">
@@ -227,7 +240,7 @@ export const App: React.FC = () => {
                 active: allCompleted,
               })}
               data-cy="ToggleAllButton"
-              onClick={onToggleAll}
+              onClick={handleToggleAll}
             />
           )}
 
@@ -237,7 +250,7 @@ export const App: React.FC = () => {
               data-cy="NewTodoField"
               type="text"
               className="todoapp__new-todo"
-              placeholder={MainPhrases.inputPlaceholder}
+              placeholder={MAIN_PHRASES.inputPlaceholder}
               ref={input}
             />
           </form>
@@ -246,8 +259,8 @@ export const App: React.FC = () => {
         {todos.length > 0 && (
           <TodoList
             todos={filteredTodos}
-            onUpdate={onUpdate}
-            onDelete={onDelete}
+            onUpdate={handleUpdateTodo}
+            onDelete={handleDeleteTodo}
             tempTodo={tempTodo}
             processingIds={processingIds}
           />
@@ -259,14 +272,14 @@ export const App: React.FC = () => {
             completedTodosCount={todos.length - activeTodosCount}
             filter={filter}
             onFilterChange={setFilter}
-            onDeleteCompleted={onDeleteCompleted}
+            onDeleteCompleted={handleDeleteCompleted}
           />
         )}
       </div>
 
       <ErrorNotification
         error={errorMessage}
-        onClose={() => setErrorMessage(ErrorMessage.default)}
+        onClose={() => setErrorMessage(ERROR_MESSAGE.default)}
       />
     </div>
   );

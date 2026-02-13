@@ -1,8 +1,15 @@
 import React from 'react';
 import { FilterType } from '../types/FilterType';
 import { TodoFilter } from './TodoFilter';
-import { MainPhrases } from '../constants';
-import { noun } from '../utils/noun';
+import { MAIN_PHRASES } from '../constants';
+import { getNoun, interpolate } from '../utils';
+
+function getItemsLeftText(count: number) {
+  return interpolate(MAIN_PHRASES.footerItemsLeft, {
+    count,
+    noun: getNoun(count, [MAIN_PHRASES.nounItem, MAIN_PHRASES.nounItems]),
+  });
+}
 
 interface Props {
   activeTodosCount: number;
@@ -19,14 +26,8 @@ export const TodoFooter: React.FC<Props> = ({
   onFilterChange,
   onDeleteCompleted,
 }) => {
-  const todosNoun = noun(activeTodosCount, [
-    MainPhrases.nounItem,
-    MainPhrases.nounItems,
-  ]);
-
-  const itemsLeft = MainPhrases.footerItemsLeft
-    .replace('{count}', String(activeTodosCount))
-    .replace('{noun}', todosNoun);
+  const hasCompletedTodos = completedTodosCount > 0;
+  const itemsLeft = getItemsLeftText(activeTodosCount);
 
   return (
     <footer className="todoapp__footer" data-cy="Footer">
@@ -41,10 +42,10 @@ export const TodoFooter: React.FC<Props> = ({
         type="button"
         className="todoapp__clear-completed"
         data-cy="ClearCompletedButton"
-        disabled={completedTodosCount === 0}
-        onClick={() => onDeleteCompleted()}
+        disabled={!hasCompletedTodos}
+        onClick={onDeleteCompleted}
       >
-        {MainPhrases.buttonClearCompleted}
+        {MAIN_PHRASES.buttonClearCompleted}
       </button>
     </footer>
   );

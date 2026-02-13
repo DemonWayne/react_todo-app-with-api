@@ -26,7 +26,7 @@ export const TodoItem: React.FC<Props> = ({
     setTitleInput(title);
   }, [title]);
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     const trimmedTitle = titleInput.trim();
 
     if (title === trimmedTitle) {
@@ -36,22 +36,22 @@ export const TodoItem: React.FC<Props> = ({
     }
 
     if (!trimmedTitle) {
-      onDelete(id)
-        .then(() => {
-          setIsEditing(false);
-        })
-        .catch(() => {
-          setTitleInput(title);
-        });
+      try {
+        await onDelete(id);
+        setIsEditing(false);
+      } catch {
+        setTitleInput(title);
+      }
 
       return;
     }
 
-    onUpdate?.(id, { title: trimmedTitle })
-      .then(() => {
-        setIsEditing(false);
-      })
-      .catch(() => {});
+    try {
+      await onUpdate?.(id, { title: trimmedTitle });
+      setIsEditing(false);
+    } catch {
+      // Keep edit mode open so user can retry
+    }
   };
 
   const handleUpdateCancel = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -60,6 +60,16 @@ export const TodoItem: React.FC<Props> = ({
       setIsEditing(false);
       event.preventDefault();
     }
+  };
+
+  const activateEditMode = () => {
+    setTitleInput(title);
+    setIsEditing(true);
+  };
+
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    onSubmit();
   };
 
   return (
@@ -85,10 +95,7 @@ export const TodoItem: React.FC<Props> = ({
           <span
             data-cy="TodoTitle"
             className="todo__title"
-            onDoubleClick={() => {
-              setTitleInput(title);
-              setIsEditing(true);
-            }}
+            onDoubleClick={activateEditMode}
           >
             {title}
           </span>
@@ -102,12 +109,7 @@ export const TodoItem: React.FC<Props> = ({
           </button>
         </>
       ) : (
-        <form
-          onSubmit={e => {
-            e.preventDefault();
-            onSubmit();
-          }}
-        >
+        <form onSubmit={handleFormSubmit}>
           <input
             data-cy="TodoTitleField"
             autoFocus

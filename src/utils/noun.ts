@@ -1,6 +1,8 @@
-export const noun = (
+const SINGULAR_COUNT = 1;
+
+export const getNoun = (
   count: number,
   [singular, plural]: [string, string],
 ): string => {
-  return count === 1 ? singular : plural;
+  return count === SINGULAR_COUNT ? singular : plural;
 };
